@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Проверка URL</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+</head>
+<body>
+  <div class="container">
+    <h1>Проверка URL на фишинг</h1>
+
+    <div class="input-section">
+      <input type="text" id="url-input" placeholder="Введите ссылку..." />
+      <button id="check-btn">Проверить</button>
+    </div>
+
+    <div id="result" class="hidden">
+    <div class="url-status">
+        <span id="original-url"></span>
+        <span id="domain-status" class="status"></span>
+    </div>
+
+    <div class="columns">
+        <div id="google" class="column">
+        <h3>Google Safe Browsing</h3>
+        <ul id="google-list"></ul>
+        </div>
+
+        <div id="open-source" class="column">
+        <h3>Open Source</h3>
+        <ul id="open-list"></ul>
+        </div>
+
+        <div id="local" class="column">
+        <h3>Local Check</h3>
+        <ul id="local-list"></ul>
+        </div>
+    </div>
+
+    <!-- Новая кнопка -->
+    <button id="details-btn" class="details-btn hidden">Посмотреть детали</button>
+
+    <!-- Новый блок для деталей -->
+    <div id="details-section" class="details hidden">
+        <h3>Подробности проверок</h3>
+        <pre id="details-content"></pre>
+    </div>
+    </div>
+
+    <div id="error" class="error hidden"></div>
+  </div>
+
+  <script src="{{ url_for('static', path='/script.js') }}"></script>
+</body>
+</html>
