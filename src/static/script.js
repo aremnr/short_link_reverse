@@ -5,6 +5,7 @@ document.getElementById("check-btn").addEventListener("click", async () => {
   const detailsBtn = document.getElementById("details-btn");
   const detailsSection = document.getElementById("details-section");
   const detailsContent = document.getElementById("details-content");
+  const loader = document.getElementById("loader");
 
   if (!urlInput) {
     errorDiv.textContent = "Введите URL";
@@ -16,6 +17,7 @@ document.getElementById("check-btn").addEventListener("click", async () => {
   errorDiv.classList.add("hidden");
   detailsBtn.classList.add("hidden");
   detailsSection.classList.add("hidden");
+  loader.classList.add("visible");
 
   try {
     const response = await fetch("/api/check", {
@@ -23,14 +25,12 @@ document.getElementById("check-btn").addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url: urlInput }),
     });
-
+    loader.classList.remove("visible");
     if (!response.ok) throw new Error("Ошибка при запросе к API");
     const data = await response.json();
 
     document.getElementById("original-url").textContent = data.original_url;
-    const domainStatus = document.getElementById("domain-status");
-    domainStatus.textContent = data.domain_status ? "Домен безопасен" : "Опасный домен";
-    domainStatus.className = "status " + (data.domain_status ? "ok" : "bad");
+    
 
     const googleList = document.getElementById("google-list");
     const openList = document.getElementById("open-list");
@@ -48,27 +48,31 @@ document.getElementById("check-btn").addEventListener("click", async () => {
     document.getElementById("open-source").className = "column " + (openPhish ? "phish" : "safe");
     document.getElementById("local").className = "column " + (localPhish ? "phish" : "safe");
 
+    const domainStatus = document.getElementById("domain-status");
+    domainStatus.textContent = !(googlePhish || openPhish || localPhish) ? "Домен безопасен" : "Опасный домен";
+    domainStatus.className = "status " + (!(googlePhish || openPhish || localPhish) ? "ok" : "bad");
+
     data.google_safebrowsing.forEach((item, index) => {
       googleList.innerHTML += `<li>Проверка ${index + 1}: ${item.phishing ? "Фишинг" : "ОК"}</li>`;
     });
 
     data.open_source.forEach((item, index) => {
       if (!item) return;
-      openList.innerHTML += `<li>${item.details.url || "Без URL"} — ${item.phishing ? "Фишинг" : "ОК"}</li>`;
+      openList.innerHTML += `<li>Проверка ${index + 1}: ${item.phishing ? "Фишинг" : "ОК"}</li>`;
     });
 
     data.local_check.forEach((item, index) => {
       localList.innerHTML += `<li>${item.details}</li>`;
     });
 
-    // Сохраним детали в скрытый блок
+    
     detailsContent.textContent = JSON.stringify({
       google_safebrowsing: data.google_safebrowsing,
       open_source: data.open_source,
       local_check: data.local_check
     }, null, 2);
 
-    // Покажем кнопку "Посмотреть детали"
+    
     detailsBtn.classList.remove("hidden");
     resultDiv.classList.remove("hidden");
 
@@ -80,7 +84,7 @@ document.getElementById("check-btn").addEventListener("click", async () => {
   }
 });
 
-// Обработчик кнопки "Посмотреть детали"
+
 document.getElementById("details-btn").addEventListener("click", () => {
   const section = document.getElementById("details-section");
   section.classList.toggle("hidden");

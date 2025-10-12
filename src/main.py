@@ -18,8 +18,5 @@ async def index(request: Request):
 
 @app.post("/api/check")
 async def check_url(url: URLRequest):
-    return phishingTest.get_data_from_all_sources(url.url)
+    return await phishingTest.get_data_from_all_sources(url.url)
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="localhost", port=8000)

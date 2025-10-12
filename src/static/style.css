@@ -183,3 +183,36 @@ button:hover {
   from { opacity: 0; transform: translateY(-10px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+
+.loader {
+  display: flex;
+  justify-content: center;
+  margin: 20px 0;
+  visibility: hidden;  /* по умолчанию скрыт */
+  height: 24px;         /* фиксированная высота, чтобы не прыгало */
+}
+
+.loader.visible {
+  visibility: visible;
+}
+
+.snake { display: flex; gap: 5px; }
+.snake div {
+  width: 12px;
+  height: 12px;
+  background-color: #0078d4;
+  border-radius: 50%;
+  animation: snakeAnim 1s infinite;
+}
+
+.snake div:nth-child(1) { animation-delay: 0s; }
+.snake div:nth-child(2) { animation-delay: 0.1s; }
+.snake div:nth-child(3) { animation-delay: 0.2s; }
+.snake div:nth-child(4) { animation-delay: 0.3s; }
+.snake div:nth-child(5) { animation-delay: 0.4s; }
+
+@keyframes snakeAnim {
+  0%, 80%, 100% { transform: scale(0); opacity: 0.3; }
+  40% { transform: scale(1); opacity: 1; }
+}
