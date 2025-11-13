@@ -4,46 +4,89 @@ import asyncio
 import os
 import hashlib
 import time
+from fastapi import HTTPException
+from config import GOOGLE_API_KEY
+from pydantic import HttpUrl
+from models import DomainTestResponse, DynamicTestResponse
+from urllib.parse import urlparse, parse_qs
+from ipaddress import ip_address
+from typing import Optional, Dict, Any, Tuple
 
 class PhishingDetector:
     def __init__(self):
         self.url_extract_regexp = r"(?P<lookbehind>(?<=url=)|(?<=href=))?([\"\'])?(?P<url>https?://[^&;]+?)(?P<lookhead>((?=\2)|[&;\s<]|$))"
         self.domain_extract_regexp = r"^(?:https?:\/\/)?(?:[^@\/\n]+@)?(?:.\.)?([^:\/\n]+)"
-
-
-    async def extract_domain(self, url):
-        is_active_domain = True
-        try:
+    
+     
+    async def request_to_site(
+            self,
+            url: HttpUrl, 
+            method: str = "HEAD",
+            allow_redirects: bool = False, 
+            headers: dict = {}, 
+            payload: dict = {}) -> dict:
+        '''
+        Base function for async requests.
+        '''
+        url=str(url)
+        content = None
+        if method == "HEAD":
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, allow_redirects=False) as res:
-                    headers = res.headers
-                    content = await res.text("utf-8")
+                async with session.head(url, allow_redirects=allow_redirects) as res:
+                    headers = await res.headers
+                    content = ""
+            return {"headers": headers, "content": content}
+        if method == "GET":
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, allow_redirects=allow_redirects) as res:
+                    headers = await res.headers
+                    content = await res.content
+            return {"headers": headers, "content": content}
+        if method == "POST":
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as res:
+                    content = await res.json()
+                    return {"headers": headers, "content": content}
+
+
+    async def extract_domain_and_url(self, url: HttpUrl) -> dict:
+        '''
+            Extract a url from html page or Location header.
+            Return: extracted url | domain 
+        '''
+        is_active_domain = True
+        headers, content = None, None
+        try:
+            res = await self.request_to_site(url)
+            headers = res.get("headers")
+            content = res.get("content")
         except Exception as e:
             is_active_domain = False
             headers = {}
             content = ""
 
         if not is_active_domain:
-            domain_match = re.match(self.domain_extract_regexp, url, re.IGNORECASE)
-            if domain_match:
-                return {"domain": domain_match.group(1), "full_url": url, "is_active": is_active_domain}
+            domain = url.host
+            if domain:
+                return {"domain": domain, "full_url": url, "is_active": is_active_domain}
             else:
                 return {"error": "No domain found in extracted URL", "is_active": is_active_domain}
         
         if 'Location' in headers:
-            location = headers['Location']
-            domain_match = re.search(self.domain_extract_regexp, location, re.IGNORECASE)
-            if domain_match:
-                return {"domain": domain_match.group(1), "full_url": location, "is_active": is_active_domain}
+            location = HttpUrl(headers['Location'])
+            domain = location.host
+            if domain:
+                return {"domain": domain, "full_url": location, "is_active": is_active_domain}
             else:
                 return {"error": "No domain found in extracted URL", "is_active": is_active_domain}
 
+        content = await self.request_to_site(url, "GET").get("content")
         match = re.search(self.url_extract_regexp, content, re.IGNORECASE)
         if match:
             extracted_url = match.group("url").strip('\'\"')
-            domain_match = re.search(self.domain_extract_regexp, extracted_url, re.IGNORECASE)
-            if domain_match:
-                return {"domain": domain_match.group(1), "full_url": extracted_url, "is_active": is_active_domain}
+            domain = HttpUrl(extracted_url).host
+            if domain:
+                return {"domain": domain, "full_url": extracted_url, "is_active": is_active_domain}
             else:
                 return {"error": "No domain found in extracted URL", "is_active": is_active_domain}
 
@@ -52,7 +95,7 @@ class PhishingDetector:
 
     async def check_google_safebrowsing(self, url):
         api_url = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
-        api_key = "AIzaSyCFMCTavxG2fV2lRWBzHd58IVDF8jZJKgY"
+        api_key = GOOGLE_API_KEY
         headers = {
             "Content-Type": "application/json",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -67,45 +110,176 @@ class PhishingDetector:
                 "platformTypes": ["ANY_PLATFORM"],
                 "threatEntryTypes": ["URL"],
                 "threatEntries": [
-                    {"url": url}
+                    {"url": str(url)}
                 ]
             }
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(f"{api_url}?key={api_key}", headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                    result = await response.json()
-                    if result.get("matches"):
-                        return {"phishing": True, "details": result["matches"]}
-                    else:
-                        return {"phishing": False, "details": result}
+            response = await self.request_to_site(HttpUrl(f"{api_url}?key={api_key}"), method="POST",  headers=headers, payload=payload)
+            response = response.get("content")
+            if response.get("matches"):
+                return {"phishing": True, "details": response["matches"]}
+            else:
+                return {"phishing": False, "details": response}
         except Exception as e:
             return {"error": str(e)}
 
 
-    async def check_open_source(self, url):
+    async def dynamic_check(self, url):
+        """
+        Расширенный анализ URL на признаки фишинга.
+        """
+        score = 0
+        details: Dict[str, Any] = {}
+
+        
+        
+        
+        url_lower = url.lower()
+
+        
+        suspicious_words = {
+            "login", "secure", "verify", "update", "account", "bank", "password",
+            "signin", "checkout", "confirm", "paypal", "appleid", "webscr"
+        }
+        for word in suspicious_words:
+            if word in url_lower:
+                score += 2
+                details.setdefault("suspicious_keywords", []).append(word)
+
+        
+        tld = url.split(".")[-1].split("/")[0]
+        suspicious_tlds = {"xyz", "top", "tk", "ml", "ga", "gq", "cf", "buzz", "fit", "cam"}
+        if tld in suspicious_tlds:
+            score += 2
+            details["suspicious_tld"] = tld
+
+        
+        if not url_lower.startswith("https://"):
+            score += 2
+            details["no_https"] = True
+
+        
+        host_part = re.findall(r"https?://([^/]+)/?", url_lower)
+        if host_part:
+            host = host_part[0]
+            try:
+                ip_address(host)
+                score += 3
+                details["ip_as_domain"] = True
+            except ValueError:
+                pass
+
+            
+            subdomain_count = host.count(".")
+            if subdomain_count > 3:
+                score += 1
+                details["many_subdomains"] = subdomain_count
+
+            
+            if "@" in host or "-" in host or "_" in host:
+                score += 1
+                details["special_symbols"] = True
+
+        
+        if len(url) > 100:
+            score += 1
+            details["long_url"] = len(url)
+
+        
+        digit_count = sum(c.isdigit() for c in url)
+        if digit_count > 5:
+            score += 1
+            details["many_digits"] = digit_count
+
+        
+        known_brands = ["paypal", "google", "apple", "microsoft", "amazon"]
+        for brand in known_brands:
+            if brand in url_lower and not re.search(rf"{brand}\.com", url_lower):
+                score += 2
+                details.setdefault("brand_mismatch", []).append(brand)
+
+        
+        
+        
+        html: Optional[str] = None
         try:
-            headers = {
-                "User-Agent": "phishtank/username"
-            }
-            phishtank_api = "https://checkurl.phishtank.com/checkurl/"
-            data = {
-                "url": url,
-                "format": "json"
-            }
             async with aiohttp.ClientSession() as session:
-                async with session.post(phishtank_api, data=data, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                    result = await response.json()
-                    if result["meta"]["status"] == "success":
-                        return {"phishing": True if result["results"]["in_database"] == True and result["results"]["verified"] != True else False, "details": result["results"]}
+                async with session.get(url, timeout=5) as resp:
+                    if resp.status == 200 and "text/html" in resp.headers.get("content-type", ""):
+                        html = await resp.text(errors="ignore")
                     else:
-                        return {"phishing": False, "details": {"info": "Not found in PhishTank database", "url": url}}
+                        details["non_html_content"] = True
         except Exception as e:
-            return {"error": str(e)}
+            details["fetch_error"] = str(e)
+
+        
+        
+        
+        if html:
+            
+            if re.search(r'<input[^>]+type=["\']?password', html, re.IGNORECASE):
+                score += 3
+                details["password_field_detected"] = True
+
+            
+            if re.search(r"(verify your account|login now|update info|confirm identity|enter password)", html, re.IGNORECASE):
+                score += 2
+                details["phishing_text"] = True
+
+            
+            if re.search(r"(mailto:|@|sendmail)", html, re.IGNORECASE):
+                score += 1
+                details["email_links_detected"] = True
+
+            
+            if re.search(r"(window\.location|document\.write|atob\(|eval\()", html, re.IGNORECASE):
+                score += 2
+                details["suspicious_js"] = True
+
+            
+            if re.search(r'src=["\']http://', html, re.IGNORECASE):
+                score += 1
+                details["mixed_content"] = True
+
+            
+            if re.search(r"display\s*:\s*none", html, re.IGNORECASE) or re.search(r"type=['\"]hidden['\"]", html, re.IGNORECASE):
+                score += 1
+                details["hidden_elements"] = True
+
+            
+            external_links = re.findall(r'href=["\'](http[s]?://[^"\']+)', html)
+            unique_domains = set()
+            for link in external_links:
+                domain = re.findall(r"https?://([^/]+)/?", link)
+                if domain:
+                    unique_domains.add(domain[0].lower())
+            if len(unique_domains) > 10:
+                score += 1
+                details["many_external_links"] = len(unique_domains)
+
+            
+            if re.search(r"data:image|data:text/html", html, re.IGNORECASE):
+                score += 1
+                details["data_uri_usage"] = True
+
+        
+        
+        
+        phishing = score >= 5  
+
+        return DynamicTestResponse(
+            original_url=url,
+            phishing=phishing,
+            score=score,
+            details=details
+        )
+
+        
 
 
-    async def local_phishing_check(self, url, dir="phishing_db"):
+    async def local_phishing_check(self, url = "", domain = "", dir="phishing_db"):
         if not(os.path.exists(dir)):
             os.mkdir(dir)
 
@@ -113,7 +287,7 @@ class PhishingDetector:
             with open(os.path.join(dir, "phishing-links-ACTIVE.txt"), "r", encoding="utf-8") as f, open(os.path.join(dir, "phishing-domains-ACTIVE.txt"), "r", encoding="utf-8") as f2:
                 links = f.read().splitlines()
                 domains = f2.read().splitlines()
-                domain = (await self.extract_domain(url)).get("domain", "")
+                domain = (await self.extract_domain_and_url(HttpUrl(url))).get("domain", "") if domain == "" else domain
                 if url in links or domain in domains:
                     return {"phishing": True, "details": "Found in local database"}
                 else:
@@ -137,29 +311,87 @@ class PhishingDetector:
         return {"phishing": False, "details": "Local check not implemented"}
 
 
-    async def get_data_from_all_sources(self, url):
-        extracted_urls_dict = await self.extract_domain(url)
-        urls = [url, extracted_urls_dict.get("full_url", ""), extracted_urls_dict.get("domain", ""), f"http://{extracted_urls_dict.get('domain', '')}/", f"https://{extracted_urls_dict.get('domain', '')}/"]
+    async def domain_check(self, url: HttpUrl) -> DomainTestResponse:
+        extracted_urls_dict = await self.extract_domain_and_url(url)
+        if "error" in extracted_urls_dict.keys():
+            return HTTPException(403, extracted_urls_dict)
+        redirect_url, redirect_domain, domain_status = extracted_urls_dict.get("full_url", ""), extracted_urls_dict.get("domain", ""), extracted_urls_dict.get("is_active", "")
+        urls = [url, redirect_url, redirect_domain]
         google_check_urls_results = []
-        open_source_check_urls_results = []
+        for url in urls:
+            t1 = time.time()
+            google_check_urls_results.append(await self.check_google_safebrowsing(url))
+            t2 = time.time()
+            print(url, t2-t1)
+        
+        return DomainTestResponse(
+            original_url=str(redirect_url),
+            domain_status=domain_status, 
+            scannig_results=google_check_urls_results            
+        )
+    
+
+    async def local_domain_check(self, url: HttpUrl) -> DomainTestResponse:
+        extracted_urls_dict = await self.extract_domain_and_url(url)
+        if "error" in extracted_urls_dict.keys():
+            return DomainTestResponse()
+        redirect_url, redirect_domain, domain_status = extracted_urls_dict.get("full_url", ""), extracted_urls_dict.get("domain", ""), extracted_urls_dict.get("is_active", "")
+        urls = [url, redirect_url, redirect_domain]
         local_check_urls_results = []
-        print(urls, extracted_urls_dict)
-        print(extracted_urls_dict.get("is_active", False), extracted_urls_dict["is_active"])
-        for url_item in urls:
+        for v, url in enumerate(urls):
+            if v == 2:
+                t1 = time.time()
+                local_check_urls_results.append(await self.local_phishing_check(domain=url))
+                t2 = time.time()
+                return DomainTestResponse(
+                    original_url=str(redirect_url),
+                    domain_status=domain_status, 
+                    scannig_results=local_check_urls_results            
+                )
             t1 = time.time()
-            google_check_urls_results.append(await self.check_google_safebrowsing(url_item))
+            local_check_urls_results.append(await self.local_phishing_check(url=url))
             t2 = time.time()
-            print(url_item, "Google check time:", t2 - t1)
-            open_source_check_urls_results.append(await self.check_open_source(url_item))
-            t1 = time.time()
-            print(url_item, "Open source check time:", t1 - t2)
-            local_check_urls_results.append(await self.local_phishing_check(url_item))
-            t2 = time.time()
-            print(url_item, "Local check time:", t2 - t1)
-        return {
-            "original_url": extracted_urls_dict.get("full_url", ""),
-            "domain_status": extracted_urls_dict.get("is_active", False),
-            "google_safebrowsing": google_check_urls_results,
-            "open_source": open_source_check_urls_results,
-            "local_check": local_check_urls_results
-    }
+            print(url, t2-t1)
+        
+        return DomainTestResponse(
+            original_url=str(redirect_url),
+            domain_status=domain_status, 
+            scannig_results=local_check_urls_results            
+        )
+
+    async def local_dynamic_check(self, url: HttpUrl) -> DynamicTestResponse:
+        extracted_urls_dict = await self.extract_domain_and_url(url)
+        if "error" in extracted_urls_dict.keys():
+            return HTTPException(403, extracted_urls_dict)
+        redirect_url= str(extracted_urls_dict.get("full_url", ""))
+        result: DynamicTestResponse = DynamicTestResponse()
+        t1 = time.time()
+        result = await self.dynamic_check(redirect_url)
+        t2 = time.time()
+        print(redirect_url, result, t2-t1)
+        return result
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
