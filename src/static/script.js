@@ -71,7 +71,7 @@ document.getElementById("check-btn").addEventListener("click", async () => {
     const localPhish = localData.domain_status;
 
     
-    document.getElementById("google").className = "column " + (googlePhish ? "phish" : "safe");
+    
     document.getElementById("dynamic").className = "column " + (dynamicPhish ? "phish" : "safe");
     
 
@@ -81,6 +81,8 @@ document.getElementById("check-btn").addEventListener("click", async () => {
     if (domainData.scannig_results && domainData.scannig_results.length > 0) {
       domainData.scannig_results.forEach((item, index) => {
         googleList.innerHTML += `<li>Проверка ${index + 1}: ${item.phishing ? "Фишинг" : "ОК"}</li>`;
+        document.getElementById("google").className = "column " + (item.phishing ? "phish" : "safe");
+        is_phish = item.phishing
       });
     } else {
       googleList.innerHTML = `<li>Проверка: ${googlePhish ? "Фишинг" : "ОК"}</li>`;
@@ -108,7 +110,7 @@ document.getElementById("check-btn").addEventListener("click", async () => {
     }
 
     
-    const isPhishingOverall = googlePhish || dynamicPhish || is_phish;
+    const isPhishingOverall = dynamicPhish || is_phish;
     const domainStatus = document.getElementById("domain-status");
     domainStatus.textContent = isPhishingOverall ? "Опасный домен" : "Домен безопасен";
     domainStatus.className = "status " + (isPhishingOverall ? "bad" : "ok");

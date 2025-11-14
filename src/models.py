@@ -11,7 +11,7 @@ class DomainTestResponse(BaseModel):
     scannig_results: list = []
 
 class DynamicTestResponse(BaseModel):
-    oginal_uwwrl: HttpUrl = None
+    oginal_url: HttpUrl = None
     phishing: bool  = True
     score: int = 0
     details: dict = {}

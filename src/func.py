@@ -33,20 +33,21 @@ class PhishingDetector:
         if method == "HEAD":
             async with aiohttp.ClientSession() as session:
                 async with session.head(url, allow_redirects=allow_redirects) as res:
-                    headers = await res.headers
+                    headers = res.headers
                     content = ""
             return {"headers": headers, "content": content}
         if method == "GET":
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, allow_redirects=allow_redirects) as res:
-                    headers = await res.headers
-                    content = await res.content
+                    headers = res.headers
+                    content = await res.text()
             return {"headers": headers, "content": content}
         if method == "POST":
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as res:
+                    response_headers = res.headers
                     content = await res.json()
-                    return {"headers": headers, "content": content}
+                    return {"headers": response_headers, "content": content}
 
 
     async def extract_domain_and_url(self, url: HttpUrl) -> dict:
@@ -60,12 +61,15 @@ class PhishingDetector:
             res = await self.request_to_site(url)
             headers = res.get("headers")
             content = res.get("content")
+            print(headers)
         except Exception as e:
+            print(e)
             is_active_domain = False
             headers = {}
             content = ""
 
         if not is_active_domain:
+            print(1)
             domain = url.host
             if domain:
                 return {"domain": domain, "full_url": url, "is_active": is_active_domain}
@@ -73,6 +77,7 @@ class PhishingDetector:
                 return {"error": "No domain found in extracted URL", "is_active": is_active_domain}
         
         if 'Location' in headers:
+            print(2)
             location = HttpUrl(headers['Location'])
             domain = location.host
             if domain:
@@ -80,9 +85,11 @@ class PhishingDetector:
             else:
                 return {"error": "No domain found in extracted URL", "is_active": is_active_domain}
 
-        content = await self.request_to_site(url, "GET").get("content")
+        content = await self.request_to_site(url, "GET")
+        content = content.get("content")
         match = re.search(self.url_extract_regexp, content, re.IGNORECASE)
         if match:
+            print(3)
             extracted_url = match.group("url").strip('\'\"')
             domain = HttpUrl(extracted_url).host
             if domain:
@@ -171,7 +178,7 @@ class PhishingDetector:
             except ValueError:
                 pass
 
-            
+       
             subdomain_count = host.count(".")
             if subdomain_count > 3:
                 score += 1
@@ -313,6 +320,7 @@ class PhishingDetector:
 
     async def domain_check(self, url: HttpUrl) -> DomainTestResponse:
         extracted_urls_dict = await self.extract_domain_and_url(url)
+        print(extracted_urls_dict)
         if "error" in extracted_urls_dict.keys():
             return HTTPException(403, extracted_urls_dict)
         redirect_url, redirect_domain, domain_status = extracted_urls_dict.get("full_url", ""), extracted_urls_dict.get("domain", ""), extracted_urls_dict.get("is_active", "")
@@ -333,6 +341,7 @@ class PhishingDetector:
 
     async def local_domain_check(self, url: HttpUrl) -> DomainTestResponse:
         extracted_urls_dict = await self.extract_domain_and_url(url)
+        print(extracted_urls_dict)
         if "error" in extracted_urls_dict.keys():
             return DomainTestResponse()
         redirect_url, redirect_domain, domain_status = extracted_urls_dict.get("full_url", ""), extracted_urls_dict.get("domain", ""), extracted_urls_dict.get("is_active", "")
@@ -361,6 +370,7 @@ class PhishingDetector:
 
     async def local_dynamic_check(self, url: HttpUrl) -> DynamicTestResponse:
         extracted_urls_dict = await self.extract_domain_and_url(url)
+        print(extracted_urls_dict)
         if "error" in extracted_urls_dict.keys():
             return HTTPException(403, extracted_urls_dict)
         redirect_url= str(extracted_urls_dict.get("full_url", ""))
